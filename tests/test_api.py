@@ -1,11 +1,8 @@
+import importlib
 import re
 import textwrap
 import unittest
-import warnings
-import importlib
-import contextlib
 
-from . import fixtures
 from importlib_metadata import (
     Distribution,
     PackageNotFoundError,
@@ -17,22 +14,20 @@ from importlib_metadata import (
     version,
 )
 
-
-@contextlib.contextmanager
-def suppress_known_deprecation():
-    with warnings.catch_warnings(record=True) as ctx:
-        warnings.simplefilter('default', category=DeprecationWarning)
-        yield ctx
+from . import fixtures
 
 
 class APITests(
     fixtures.EggInfoPkg,
+    fixtures.EggInfoPkgPipInstalledNoToplevel,
+    fixtures.EggInfoPkgPipInstalledNoModules,
+    fixtures.EggInfoPkgPipInstalledExternalDataFiles,
+    fixtures.EggInfoPkgSourcesFallback,
     fixtures.DistInfoPkg,
     fixtures.DistInfoPkgWithDot,
     fixtures.EggInfoFile,
     unittest.TestCase,
 ):
-
     version_pattern = r'\d+\.\d+(\.\d)?'
 
     def test_retrieves_version_of_self(self):
@@ -63,15 +58,28 @@ class APITests(
                     distribution(prefix)
 
     def test_for_top_level(self):
-        self.assertEqual(
-            distribution('egginfo-pkg').read_text('top_level.txt').strip(), 'mod'
-        )
+        tests = [
+            ('egginfo-pkg', 'mod'),
+            ('egg_with_no_modules-pkg', ''),
+        ]
+        for pkg_name, expect_content in tests:
+            with self.subTest(pkg_name):
+                self.assertEqual(
+                    distribution(pkg_name).read_text('top_level.txt').strip(),
+                    expect_content,
+                )
 
     def test_read_text(self):
-        top_level = [
-            path for path in files('egginfo-pkg') if path.name == 'top_level.txt'
-        ][0]
-        self.assertEqual(top_level.read_text(), 'mod\n')
+        tests = [
+            ('egginfo-pkg', 'mod\n'),
+            ('egg_with_no_modules-pkg', '\n'),
+        ]
+        for pkg_name, expect_content in tests:
+            with self.subTest(pkg_name):
+                top_level = [
+                    path for path in files(pkg_name) if path.name == 'top_level.txt'
+                ][0]
+                self.assertEqual(top_level.read_text(), expect_content)
 
     def test_entry_points(self):
         eps = entry_points()
@@ -94,7 +102,7 @@ class APITests(
         Entry points should only be exposed for the first package
         on sys.path with a given name (even when normalized).
         """
-        alt_site_dir = self.fixtures.enter_context(fixtures.tempdir())
+        alt_site_dir = self.fixtures.enter_context(fixtures.tmp_path())
         self.fixtures.enter_context(self.add_sys_path(alt_site_dir))
         alt_pkg = {
             "DistInfo_pkg-1.1.0.dist-info": {
@@ -141,13 +149,27 @@ class APITests(
         resolved = version('importlib-metadata')
         assert re.match(self.version_pattern, resolved)
 
-    def test_missing_key_legacy(self):
+    def test_missing_key(self):
         """
-        Requesting a missing key will still return None, but warn.
+        Requesting a missing key raises KeyError.
         """
         md = metadata('distinfo-pkg')
-        with suppress_known_deprecation():
-            assert md['does-not-exist'] is None
+        with self.assertRaises(KeyError):
+            md['does-not-exist']
+
+    def test_get_key(self):
+        """
+        Getting a key gets the key.
+        """
+        md = metadata('egginfo-pkg')
+        assert md.get('Name') == 'egginfo-pkg'
+
+    def test_get_missing_key(self):
+        """
+        Requesting a missing key will return None.
+        """
+        md = metadata('distinfo-pkg')
+        assert md.get('does-not-exist') is None
 
     @staticmethod
     def _test_files(files):
@@ -171,6 +193,9 @@ class APITests(
 
     def test_files_egg_info(self):
         self._test_files(files('egginfo-pkg'))
+        self._test_files(files('egg_with_module-pkg'))
+        self._test_files(files('egg_with_no_modules-pkg'))
+        self._test_files(files('sources_fallback-pkg'))
 
     def test_version_egg_info_file(self):
         self.assertEqual(version('egginfo-file'), '0.1')

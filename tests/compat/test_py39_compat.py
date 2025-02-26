@@ -1,8 +1,7 @@
-import sys
 import pathlib
+import sys
 import unittest
 
-from . import fixtures
 from importlib_metadata import (
     distribution,
     distributions,
@@ -11,11 +10,12 @@ from importlib_metadata import (
     version,
 )
 
+from .. import fixtures
+
 
 class OldStdlibFinderTests(fixtures.DistInfoPkgOffPath, unittest.TestCase):
     def setUp(self):
-        python_version = sys.version_info[:2]
-        if python_version < (3, 8) or python_version > (3, 9):
+        if sys.version_info >= (3, 10):
             self.skipTest("Tests specific for Python 3.8/3.9")
         super().setUp()
 
